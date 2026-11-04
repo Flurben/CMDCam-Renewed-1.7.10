@@ -5,6 +5,8 @@ import java.util.List;
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
 import net.minecraft.client.Minecraft;
+import net.minecraft.entity.player.EntityPlayerMP;
+import team.creative.cmdcam.server.CMDCamServer;
 import team.creative.cmdcam.common.math.point.CamPoint;
 import team.creative.cmdcam.common.math.vec.Vec3d;
 import team.creative.cmdcam.common.scene.CamScene;
@@ -25,6 +27,33 @@ public class CMDCamClient {
     private static boolean hideGuiCache;
     private static int thirdPersonCache;
     private static boolean smoothCameraCache;
+
+    private static long protectServerUntil;
+    private static EntityPlayerMP protectedPlayer;
+
+    /**
+     * The camera can move the player any distance between two packets. The server scans all blocks between the old and the new position for collisions, which takes forever for a long
+     * diagonal, and in singleplayer the check for moving too quickly does not apply to the owner of the world. The scan is skipped for entities with noClip. Dedicated servers do not
+     * need this: they reject such a move before the scan.
+     */
+    public static void updateServerProtection() {
+        EntityPlayerMP owner = mc.isSingleplayer() ? CMDCamServer.localOwner : null;
+        boolean protect = owner != null && (isPlayerCamera() || System.currentTimeMillis() < protectServerUntil);
+        if (protectedPlayer != null && (protectedPlayer != owner || !protect)) {
+            protectedPlayer.noClip = false;
+            protectedPlayer = null;
+        }
+        if (protect) {
+            owner.noClip = true;
+            protectedPlayer = owner;
+        }
+    }
+
+    /** For a single large move of the player. Long enough for the position to reach the server. */
+    public static void protectServerMove() {
+        protectServerUntil = System.currentTimeMillis() + 2000;
+        updateServerProtection();
+    }
 
     public static float partialTicks() {
         return partialTicks;
@@ -144,6 +173,7 @@ public class CMDCamClient {
             return;
         CamRun finished = run;
         run = null;
+        protectServerUntil = System.currentTimeMillis() + 2000; // The last position and return_start are still on their way
         finished.finish();
         mc.gameSettings.hideGUI = hideGuiCache;
         mc.gameSettings.thirdPersonView = thirdPersonCache;
@@ -200,6 +230,7 @@ public class CMDCamClient {
     public static void teleportTo(CamPoint point) {
         if (mc.thePlayer == null)
             return;
+        protectServerMove();
         mc.thePlayer.capabilities.isFlying = mc.thePlayer.capabilities.allowFlying;
         CamEventHandlerClient.roll((float) point.roll);
         CamEventHandlerClient.fov(point.zoom - CamEventHandlerClient.fovVanilla());

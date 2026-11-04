@@ -4,17 +4,26 @@ Camera paths and cinematic shots by command for Minecraft 1.7.10 (Forge 10.13.4.
 
 ## Status
 
-**Plays in singleplayer in the dev client.** The dedicated server, `/cam-server` and multiplayer are untested.
+**Tested in singleplayer, not yet on a dedicated server or with a second player.**
 
 | Part | Checked by |
 | --- | --- |
 | Math, timers, stage planning, duration parsing | `MathSelfTest`: 348 checks pass, run by `./gradlew build` |
 | All code against Minecraft 1.7.10 and Forge | `./gradlew build` passes, including reobfuscation |
-| Coremod hook targets | Checked against the decompiled source, the client logs `Patched EntityRenderer` |
-| Mod loading | `runClient` reaches the end of Forge loading in the deobfuscated dev client |
-| Release jar | Loads in a Forge client and logs `Patched EntityRenderer`, scenes not played with it yet |
-| Dedicated server | Not run yet, `runServer` asks you to accept the EULA |
-| Playing scenes in singleplayer | Camera playback looked right in a manual test, commands and saving responded |
+| Playing scenes in plain Forge | In-game test, 37 of 37 groups pass: Prism, reobfuscated jar, Java 8, LWJGL 2.9.4 |
+| Playing scenes in a modpack | In-game test, 37 of 37 groups pass in two runs: GT New Horizons 2.8.4 with 230 mods, Angelica, lwjgl3ify, Java 25, LWJGL 3.3.3 |
+| Preview, outside mode, hidden HUD, roll and zoom | Screenshots from the in-game test, checked by eye in both setups |
+| `/cam-server` with the world owner as the only player | In-game test |
+| Holding the zoom and roll keys | In-game test with LWJGL 2 only. It is skipped under lwjgl3ify, where the keyboard cannot be simulated |
+| Dedicated server | **Not run**, `runServer` asks you to accept the EULA. A static check found no client classes in server code |
+| A second player, LAN, joining a real server | **Not tested** |
+| Real mouse and keyboard input | Manual test in the dev client only, the in-game test simulates key presses |
+
+The in-game test lives in `src/ingametest` and only becomes part of the jar with `-PingameTest`, a normal build does not contain it. It runs when the game is started with `-Dcmdcam.ingametest=true` (add `-Dcmdcam.ingametest.slow=true` for a large modpack, and `-Dcmdcam.ingametest.only=<part of a name>` for selected tests), writes `cmdcam-ingametest.txt` and screenshots to the game directory, and closes the game. Use a world and instance you do not need: it creates a test world, and it moves and kills the player.
+
+```bash
+./gradlew jar reobfJar -PingameTest
+```
 
 To run the tests without Gradle (no Minecraft needed), from the project root:
 
@@ -76,7 +85,7 @@ New in this port, in neither upstream version:
 
 ## Fixed upstream issues
 
-Numbers refer to the [upstream issues](https://github.com/CreativeMD/CMDCam/issues). Only a singleplayer playback test has been done so far, so most have not been checked individually.
+Numbers refer to the [upstream issues](https://github.com/CreativeMD/CMDCam/issues). The in-game test covers most of these in singleplayer. Anything that depends on another player or a dedicated server has not been checked.
 
 | Issue | Problem | Fix |
 | --- | --- | --- |
@@ -104,8 +113,23 @@ Other bugs found while porting:
 - Printing a duration of 0 crashed
 - `/cam-server start` with a duration changed the saved scene
 - Previewing or playing changed the rotation of the scene's points
+- In singleplayer, a very long jump of the camera (`/cam goto`, a fast path, `return_start`) could freeze the server for good, because it scanned every block between the old and the new position for collisions
+- `/cam-server` crashed with an invalid selector such as `@r[c=-5]`
+- A following scene whose target was already gone sent the camera to its offsets near the world origin, it now waits where it is
 
 ## Known limitations
+
+- **Key conflicts in modpacks:** default keys can clash with other mods, and 1.7.10 gives a key press to only one binding. Change them in the Controls menu. In GT New Horizons 2.8.4:
+
+  | Key | CMDCam | Also used by | Effect |
+  | --- | --- | --- | --- |
+  | `P` | Add point | Hardcore Ender Expansion: open Compendium | Adds the point **and opens the book** |
+  | `Delete` | Clear points | Navigator: action | CMDCam's binding gets the press |
+  | `V` | Zoom in | Place item (as configured in that pack), `key.mm-paste` | Another binding gets the press event |
+  | `B` | Reset zoom | JourneyMap: create waypoint | Another binding gets the press event |
+  | `J` | Roll right | JourneyMap: toggle map | Another binding gets the press event |
+
+  CMDCam reads zoom and roll keys as held state, so these should still work on `V`, `B` and `J`, with the other mod reacting as well. That has not been tested in the pack.
 
 - **Minema is not supported.** The upstream integration is a stub, so nothing was ported.
 - **Scene titles** do not exist as a concept in 1.7.10.

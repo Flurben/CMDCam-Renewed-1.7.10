@@ -19,8 +19,10 @@ public class CamEventHandler {
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.START)
+        if (event.phase == TickEvent.Phase.START) {
             CamPacket.runServerTasks();
+            CMDCamServer.updateLocalOwner();
+        }
     }
 
 }

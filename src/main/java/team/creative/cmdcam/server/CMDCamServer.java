@@ -15,6 +15,14 @@ public class CMDCamServer {
     private static final int PERMISSION_LEVEL = 4;
     private static final int MAX_POINTS = 4096;
 
+    /** The player owning this singleplayer world, null on a dedicated server. */
+    public static volatile EntityPlayerMP localOwner;
+
+    public static void updateLocalOwner() {
+        MinecraftServer server = MinecraftServer.getServer();
+        localOwner = server != null && server.isSinglePlayer() ? server.getConfigurationManager().func_152612_a(server.getServerOwner()) : null;
+    }
+
     public static CamSaveData data() {
         World world = MinecraftServer.getServer().worldServerForDimension(0);
         CamSaveData data = (CamSaveData) world.loadItemData(CamSaveData.class, CamSaveData.DATA_NAME);

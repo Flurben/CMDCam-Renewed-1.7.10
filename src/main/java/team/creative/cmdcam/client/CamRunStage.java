@@ -54,8 +54,10 @@ public class CamRunStage extends RunStage {
             pitchFollow = new CamFollow<>(CamAttribute.PITCH, scene.pitchStep, CamAttribute.PITCH.get(currentView));
             yawFollow = new CamFollow<>(CamAttribute.YAW, scene.yawStep, CamAttribute.YAW.get(currentView));
         }
-        if (scene.posTarget != null)
+        if (scene.posTarget != null) {
             posFollow = new CamFollow<>(CamAttribute.POSITION, scene.posStep, CamAttribute.POSITION.get(currentView));
+            lastPos = new Vec3d(currentView); // Without a target the points are only offsets, not a place to go to
+        }
         started = true;
     }
 

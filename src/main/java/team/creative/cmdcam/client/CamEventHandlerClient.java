@@ -155,6 +155,7 @@ public class CamEventHandlerClient {
         lastFrame = now;
 
         CMDCamClient.partialTicks(event.renderTickTime);
+        CMDCamClient.updateServerProtection();
 
         if (!(mc.mouseHelper instanceof CamMouseHelper))
             mc.mouseHelper = new CamMouseHelper(mc.mouseHelper);

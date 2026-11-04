@@ -136,9 +136,13 @@ public class CommandCamServer extends CamCommandBase implements CamCommandProces
     private static List<EntityPlayerMP> players(ICommandSender sender, String selector) {
         List<EntityPlayerMP> players = new ArrayList<>();
         if (PlayerSelector.hasArguments(selector) || selector.startsWith("@")) {
-            EntityPlayerMP[] matched = PlayerSelector.matchPlayers(sender, selector);
-            if (matched != null)
-                players.addAll(Arrays.asList(matched));
+            try {
+                EntityPlayerMP[] matched = PlayerSelector.matchPlayers(sender, selector);
+                if (matched != null)
+                    players.addAll(Arrays.asList(matched));
+            } catch (IllegalArgumentException e) { // Vanilla does not check its arguments, for example @r[c=-5]
+                throw new CommandException("cam.target.not_found", selector);
+            }
         } else
             players.add(getPlayer(sender, selector));
         return players;
