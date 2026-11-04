@@ -2,6 +2,10 @@
 
 Camera paths and cinematic shots by command for Minecraft 1.7.10 (Forge 10.13.4.1614). This is a port of the features of modern [CMDCam](https://github.com/CreativeMD/CMDCam) by CreativeMD (the `1.21` branch) to 1.7.10, with additional features and bug fixes.
 
+## Download
+
+Get the jar from the [releases page](https://github.com/Flurben/CMDCam-Renewed-1.7.10/releases) and put it in the `mods` folder of a Minecraft 1.7.10 client with Forge 10.13.4.1614. Take the `cmdcam-<version>.jar`, without `dev` or `sources` in its name.
+
 ## Status
 
 **Tested in singleplayer, not yet on a dedicated server or with a second player.**

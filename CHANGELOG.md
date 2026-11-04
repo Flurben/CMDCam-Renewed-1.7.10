@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 (2026-11-04)
+
+First test release.
 
 Initial port of modern CMDCam (`1.21` branch) to Minecraft 1.7.10. Tested in singleplayer in plain Forge and in GT New Horizons 2.8.4; the dedicated server and multiplayer are untested. See the [README](README.md) for features, fixed issues and known limitations.
 
