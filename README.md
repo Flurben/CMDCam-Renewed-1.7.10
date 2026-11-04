@@ -4,7 +4,7 @@ Camera paths and cinematic shots by command for Minecraft 1.7.10 (Forge 10.13.4.
 
 ## Status
 
-**Compiles and loads, but has not been played in game yet.** Scene playback, commands, rendering and multiplayer are untested.
+**Plays in singleplayer in the dev client.** The dedicated server, `/cam-server` and multiplayer are untested.
 
 | Part | Checked by |
 | --- | --- |
@@ -12,8 +12,9 @@ Camera paths and cinematic shots by command for Minecraft 1.7.10 (Forge 10.13.4.
 | All code against Minecraft 1.7.10 and Forge | `./gradlew build` passes, including reobfuscation |
 | Coremod hook targets | Checked against the decompiled source, the client logs `Patched EntityRenderer` |
 | Mod loading | `runClient` reaches the end of Forge loading in the deobfuscated dev client |
-| Dedicated server, `runObfClient` (the release jar) | Not run yet |
-| Playing scenes in game | Not done yet |
+| Release jar | Loads in a Forge client and logs `Patched EntityRenderer`, scenes not played with it yet |
+| Dedicated server | Not run yet, `runServer` asks you to accept the EULA |
+| Playing scenes in singleplayer | Camera playback looked right in a manual test, commands and saving responded |
 
 To run the tests without Gradle (no Minecraft needed), from the project root:
 
@@ -26,6 +27,8 @@ To build the mod, which also runs these tests:
 ```bash
 ./gradlew build
 ```
+
+`runObfClient` looks for mods in `run/client/mods`, but the task puts the jar in `run/obfuscated/mods`. Copy it over to test the release jar, and remove the copy afterwards, because `runClient` would otherwise load the mod twice.
 
 ## Usage
 
@@ -73,7 +76,7 @@ New in this port, in neither upstream version:
 
 ## Fixed upstream issues
 
-Numbers refer to the [upstream issues](https://github.com/CreativeMD/CMDCam/issues). None of these has been confirmed in game yet.
+Numbers refer to the [upstream issues](https://github.com/CreativeMD/CMDCam/issues). Only a singleplayer playback test has been done so far, so most have not been checked individually.
 
 | Issue | Problem | Fix |
 | --- | --- | --- |
