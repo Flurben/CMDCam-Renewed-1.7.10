@@ -1,0 +1,21 @@
+{
+	"modListVersion": 2,
+	"modList": [{
+		"modid": "${modId}",
+		"name": "${modName}",
+		"description": "Camera paths and cinematic shots by command. A port of the features of modern CMDCam to 1.7.10, with additional features and bug fixes.",
+		"version": "${modVersion}",
+		"mcversion": "${minecraftVersion}",
+		"url": "",
+		"updateUrl": "",
+		"authorList": ["CreativeMD", "Flurben"],
+		"credits": "Based on CMDCam by CreativeMD, LGPL-3.0",
+		"logoFile": "cmdcam.png",
+		"screenshots": [],
+		"parent": "",
+		"requiredMods": [],
+		"dependencies": [],
+		"dependants": [],
+		"useDependencyInformation": false
+	}]
+}
