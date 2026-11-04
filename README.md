@@ -28,7 +28,7 @@ To build the mod, which also runs these tests:
 ./gradlew build
 ```
 
-`runObfClient` looks for mods in `run/client/mods`, but the task puts the jar in `run/obfuscated/mods`. Copy it over to test the release jar, and remove the copy afterwards, because `runClient` would otherwise load the mod twice.
+`runObfClient` looks for mods in `run/client/mods`, but the task puts the jar in `run/obfuscated/mods`. Copy it over to test the release jar, and remove the copy afterwards, because `runClient` would otherwise load the mod twice. On Windows, `runObfClient` crashed about 40 seconds after launch in both runs so far, with an `UnsatisfiedLinkError` in the sound system. One of those runs did not have this mod loaded, so the crash is not caused by it, and it did not happen in `runClient`.
 
 ## Usage
 
