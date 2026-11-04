@@ -1,0 +1,5 @@
+// Applied by the GTNH convention plugin
+tasks.named("test") {
+    useJUnitPlatform()
+    testLogging { showStandardStreams = true }
+}

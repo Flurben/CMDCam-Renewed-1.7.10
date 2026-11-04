@@ -4,13 +4,16 @@ Camera paths and cinematic shots by command for Minecraft 1.7.10 (Forge 10.13.4.
 
 ## Status
 
-**Not compiled against Minecraft yet, and never run in game.** Expect some fixes during the first build.
+**Compiles and loads, but has not been played in game yet.** Scene playback, commands, rendering and multiplayer are untested.
 
 | Part | Checked by |
 | --- | --- |
-| Math, timers, stage planning, duration parsing | `MathSelfTest`: 348 checks pass |
-| Calls between the mod's own classes | `javac` without Minecraft on the classpath: no errors in the mod's own members |
-| Everything touching Minecraft, Forge or the coremod | Nothing yet, needs the Gradle build and `runClient` / `runServer` |
+| Math, timers, stage planning, duration parsing | `MathSelfTest`: 348 checks pass, run by `./gradlew build` |
+| All code against Minecraft 1.7.10 and Forge | `./gradlew build` passes, including reobfuscation |
+| Coremod hook targets | Checked against the decompiled source, the client logs `Patched EntityRenderer` |
+| Mod loading | `runClient` reaches the end of Forge loading in the deobfuscated dev client |
+| Dedicated server, `runObfClient` (the release jar) | Not run yet |
+| Playing scenes in game | Not done yet |
 
 To run the tests without Gradle (no Minecraft needed), from the project root:
 
@@ -18,9 +21,7 @@ To run the tests without Gradle (no Minecraft needed), from the project root:
 mkdir -p build/selftest && javac --release 8 -Xlint:-options -encoding UTF-8 -d build/selftest $(find src/main/java/team/creative/cmdcam/common/math src/main/java/team/creative/cmdcam/common/scene/attribute src/main/java/team/creative/cmdcam/common/scene/timer src/main/java/team/creative/cmdcam/common/scene/run -name '*.java') src/main/java/team/creative/cmdcam/common/util/DurationParser.java src/test/java/team/creative/cmdcam/MathSelfTest.java && java -cp build/selftest team.creative.cmdcam.MathSelfTest
 ```
 
-`MathSelfTest` has a `main` method and no test framework, so Gradle compiling it does not run it.
-
-To build the mod:
+To build the mod, which also runs these tests:
 
 ```bash
 ./gradlew build

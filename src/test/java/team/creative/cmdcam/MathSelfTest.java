@@ -56,7 +56,10 @@ public class MathSelfTest {
         }
     }
 
-    public static void main(String[] args) {
+    /** @return the number of failed checks */
+    public static int runAll() {
+        failures = 0;
+        checks = 0;
         interpolationsHitTheirPoints();
         distanceTiming();
         circular();
@@ -67,7 +70,11 @@ public class MathSelfTest {
         durations();
 
         System.out.println(checks + " checks, " + failures + " failed");
-        if (failures > 0)
+        return failures;
+    }
+
+    public static void main(String[] args) {
+        if (runAll() > 0)
             System.exit(1);
     }
 

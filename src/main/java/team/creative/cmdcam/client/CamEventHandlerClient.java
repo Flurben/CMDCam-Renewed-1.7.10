@@ -17,6 +17,7 @@ import net.minecraft.client.renderer.EntityRenderer;
 import net.minecraft.client.settings.GameSettings;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraftforge.client.event.MouseEvent;
+import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderPlayerEvent;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.event.entity.player.EntityInteractEvent;
@@ -244,6 +245,13 @@ public class CamEventHandlerClient {
             PathRenderer.render();
     }
 
+    /** The hand belongs to the player, it should not float in front of a separate camera. */
+    @SubscribeEvent
+    public void renderHand(RenderHandEvent event) {
+        if (CMDCamClient.isPlayingOutside())
+            event.setCanceled(true);
+    }
+    
     /** Vanilla decides on some of the player's rendering by comparing it with the view entity. */
     @SubscribeEvent
     public void renderPlayerPre(RenderPlayerEvent.Pre event) {
