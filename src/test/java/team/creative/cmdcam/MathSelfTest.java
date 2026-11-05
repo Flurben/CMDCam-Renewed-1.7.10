@@ -14,6 +14,9 @@ import team.creative.cmdcam.common.math.point.PathContext;
 import team.creative.cmdcam.common.math.vec.Vec1d;
 import team.creative.cmdcam.common.math.vec.Vec3d;
 import team.creative.cmdcam.common.scene.attribute.CamAttribute;
+import team.creative.cmdcam.common.scene.path.PathNames;
+import team.creative.cmdcam.common.scene.path.PathStats;
+import team.creative.cmdcam.common.scene.path.RelativeCoordinate;
 import team.creative.cmdcam.common.scene.run.RunStage;
 import team.creative.cmdcam.common.scene.run.StagePlan;
 import team.creative.cmdcam.common.scene.timer.RealTimeTimer;
@@ -68,9 +71,101 @@ public class MathSelfTest {
         timers();
         follow();
         durations();
+        pathNames();
+        relativeCoordinates();
+        pathStats();
 
         System.out.println(checks + " checks, " + failures + " failed");
         return failures;
+    }
+
+    private static String repeat(char character, int count) {
+        return new String(new char[count]).replace('\0', character);
+    }
+
+    private static void pathNames() {
+        for (String good : new String[] { "a", "My Path 2", "t_x", "~", "@e[", "#x", "%s%s", "a.b", "..a", "con1", repeat('y', 64) })
+            check("valid name " + good, PathNames.isValid(good));
+        for (String bad : new String[] { null, "", " a", "a ", "a.", ".", "..", "a/b", "a\\b", "../x", "a:b", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b", "\u00a7cred", "a\nb", "con", "CON", "nul.txt", "COM1",
+                "lpt9.a", repeat('y', 65) })
+            check("invalid name " + bad, !PathNames.isValid(bad));
+
+        for (String any : new String[] { null, "", " ", "...", "a/b", "../../x", "con", "COM1.txt", " a. ", "\u00a7", repeat('/', 300), repeat('y', 300) + "." })
+            check("sanitized is valid: " + any + " -> " + PathNames.sanitize(any), PathNames.isValid(PathNames.sanitize(any)));
+        check("a valid name stays as it is", PathNames.sanitize("My Path").equals("My Path"));
+        check("slash is replaced", PathNames.sanitize("a/b").equals("a_b"));
+
+        List<String> taken = new ArrayList<>(Arrays.asList("Foo", "foo copy"));
+        check("a free name stays", PathNames.free("bar", taken).equals("bar"));
+        check("taken ignoring case gets a number " + PathNames.free("FOO", taken), PathNames.free("FOO", taken).equals("FOO copy 2"));
+        check("first copy", PathNames.free("x", Arrays.asList("x")).equals("x copy"));
+        String longName = repeat('y', PathNames.MAX_LENGTH);
+        String copy = PathNames.free(longName, Arrays.asList(longName));
+        check("the copy of a long name fits " + copy, PathNames.isValid(copy) && !copy.equals(longName));
+    }
+
+    private static void relativeCoordinates() {
+        near("absolute", 12.5, RelativeCoordinate.parse(100, "12.5"));
+        near("negative", -3, RelativeCoordinate.parse(100, "-3"));
+        near("base", 100, RelativeCoordinate.parse(100, "~"));
+        near("offset", 105, RelativeCoordinate.parse(100, "~5"));
+        near("negative offset", 97.5, RelativeCoordinate.parse(100, "~-2.5"));
+        near("spaces around it", 7, RelativeCoordinate.parse(100, " 7 "));
+        for (String bad : new String[] { "", " ", "~~", "~x", "x", "NaN", "Infinity", "-Infinity", "~NaN", "~Infinity", "1e400", "5~" }) {
+            boolean rejected = false;
+            try {
+                RelativeCoordinate.parse(100, bad);
+            } catch (NumberFormatException e) {
+                rejected = true;
+            }
+            check("rejects " + bad, rejected);
+        }
+    }
+
+    private static void pathStats() {
+        PathContext noTarget = new PathContext() {
+            @Override
+            public Vec3d lookCenter() {
+                return null;
+            }
+        };
+        List<CamPoint> corner = Arrays.asList(p(0, 100, 0, 0), p(30, 100, 0, 0), p(30, 100, 30, 0));
+        PathStats stats = PathStats.of(corner, CamInterpolation.LINEAR, false, noTarget, 10000);
+        check("point count", stats.points == 3);
+        near("length follows the curve", 60, stats.length);
+        near("speed", 6, stats.speed);
+        near("min x", 0, stats.min.x);
+        near("max x", 30, stats.max.x);
+        near("max z", 30, stats.max.z);
+        near("height stays", 0, stats.max.y - stats.min.y);
+        check("same number of steps as /cam show", stats.samples.size() == 41);
+        near("begins at the first point", 0, stats.samples.get(0).distance(corner.get(0)));
+        near("ends at the last point", 0, stats.samples.get(40).distance(corner.get(2)));
+
+        List<CamPoint> moved = new ArrayList<>();
+        for (CamPoint point : corner)
+            moved.add(new CamPoint(point.x + 500, point.y - 20, point.z + 7, 0, 0, 0, 70));
+        for (CamInterpolation interpolation : CamInterpolation.all()) {
+            PathStats a = PathStats.of(corner, interpolation, false, noTarget, 1000);
+            PathStats b = PathStats.of(moved, interpolation, false, noTarget, 1000);
+            near(interpolation.id + " moving a path keeps its length", a.length, b.length);
+            check(interpolation.id + " curve is at least the straight distance", a.length >= corner.get(0).distance(corner.get(2)) - 1E-6);
+        }
+
+        PathStats none = PathStats.of(new ArrayList<CamPoint>(), CamInterpolation.HERMITE, false, noTarget, 1000);
+        check("no points", none.points == 0 && none.samples.isEmpty() && none.length == 0 && none.min == null);
+        PathStats one = PathStats.of(Arrays.asList(p(1, 2, 3, 0)), CamInterpolation.HERMITE, false, noTarget, 1000);
+        check("one point", one.points == 1 && one.samples.size() == 1 && one.length == 0 && one.min != null);
+        PathStats same = PathStats.of(Arrays.asList(p(1, 2, 3, 0), p(1, 2, 3, 0)), CamInterpolation.HERMITE, true, noTarget, 1000);
+        check("points at one place, length " + same.length + ", samples " + same.samples.size(), same.length < 1E-6 && !same.samples.isEmpty());
+        PathStats broken = PathStats.of(Arrays.asList(p(Double.NaN, 2, 3, 0), p(1, 2, 3, 0), p(4, 2, 3, 0)), CamInterpolation.HERMITE, false, noTarget, 1000);
+        for (Vec3d sample : broken.samples)
+            check("no invalid sample", !Double.isNaN(sample.x + sample.y + sample.z));
+        List<CamPoint> many = new ArrayList<>();
+        for (int i = 0; i < 4096; i++)
+            many.add(p(i, 0, 0, 0));
+        check("the samples of a large path are limited", PathStats.of(many, CamInterpolation.LINEAR, false, noTarget, 1000).samples.size() <= 1001);
+        near("no time means no speed", 0, PathStats.of(corner, CamInterpolation.LINEAR, false, noTarget, 0).speed);
     }
 
     public static void main(String[] args) {

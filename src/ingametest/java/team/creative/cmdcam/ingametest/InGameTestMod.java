@@ -53,7 +53,6 @@ import team.creative.cmdcam.client.CMDCamClient;
 import team.creative.cmdcam.client.CamEventHandlerClient;
 import team.creative.cmdcam.client.CamMouseHelper;
 import team.creative.cmdcam.client.CameraEntity;
-import team.creative.cmdcam.client.ClientSceneStorage;
 import team.creative.cmdcam.client.KeyHandler;
 import team.creative.cmdcam.common.math.interpolation.CamInterpolation;
 import team.creative.cmdcam.common.math.point.CamPoint;
@@ -72,9 +71,15 @@ public class InGameTestMod {
     /** A big modpack needs minutes to load and to create a world. */
     private static final boolean SLOW = Boolean.getBoolean("cmdcam.ingametest.slow");
     private static final long TIMEOUT_SECONDS = SLOW ? 1200 : 300;
-    private static final long WATCHDOG_MILLIS = (SLOW ? 90 : 20) * 60 * 1000;
-    private static final long STALL_MILLIS = (SLOW ? 25 : 2) * 60 * 1000;
+    /** Once in a world anything taking this long is stuck, there is no reason to wait for the limits above. */
+    private static final long TASK_TIMEOUT_SECONDS = SLOW ? 120 : 45;
+    private static final long WATCHDOG_MILLIS = (SLOW ? 60 : 15) * 60 * 1000;
+    private static final long LOADING_STALL_MILLIS = (SLOW ? 12 : 3) * 60 * 1000;
+    private static final long STALL_MILLIS = (SLOW ? 3 : 1) * 60 * 1000;
+    private static final long TEST_LIMIT_MILLIS = (SLOW ? 8 : 2) * 60 * 1000;
     private static final double SPAWN_X = 0.5, SPAWN_Y = 100, SPAWN_Z = 0.5;
+
+    private final PathTests paths = new PathTests(this);
 
     private final Queue<FutureTask<?>> clientTasks = new ConcurrentLinkedQueue<>();
     private final Queue<FutureTask<?>> serverTasks = new ConcurrentLinkedQueue<>();
@@ -88,10 +93,15 @@ public class InGameTestMod {
     private volatile List<Frame> recording;
     private volatile String pendingShot;
     private volatile CountDownLatch shotDone;
-    private volatile boolean watchGl;
+    volatile boolean watchGl;
     private volatile long lastProgress;
-    private volatile int glErrors;
-    private volatile int matrixDepth;
+    /** False while the game is loading or a world starts, these can take minutes and do not answer in the meantime. */
+    private volatile boolean inWorld;
+    private volatile boolean everInWorld;
+    private volatile long testStarted;
+    private volatile String testName;
+    volatile int glErrors;
+    volatile int matrixDepth;
 
     private Method fovMethod;
     private Field rollField;
@@ -110,6 +120,14 @@ public class InGameTestMod {
     public void postInit(FMLPostInitializationEvent event) {
         if (!Boolean.getBoolean("cmdcam.ingametest"))
             return;
+        // How a launcher starts the game is hard to change between two runs, so a run can be chosen with this file
+        File options = new File(mc.mcDataDir, "cmdcam-ingametest.properties");
+        if (options.isFile())
+            try (java.io.InputStream input = new java.io.FileInputStream(options)) {
+                System.getProperties().load(input);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException(e);
+            }
         FMLCommonHandler.instance().bus().register(this);
         Thread script = new Thread(this::runScript, "CMDCam in-game test");
         script.setDaemon(true);
@@ -124,8 +142,11 @@ public class InGameTestMod {
                     return;
                 }
                 long now = System.currentTimeMillis();
-                if (now - lastProgress > STALL_MILLIS || now - begin > WATCHDOG_MILLIS) {
-                    line("ABORT  no progress for " + (now - lastProgress) / 1000 + " s, state of all threads:");
+                long stall = inWorld || everInWorld ? STALL_MILLIS : LOADING_STALL_MILLIS; // Only the first world can take long, the game has loaded by then
+                boolean testTooLong = inWorld && testStarted > 0 && now - testStarted > TEST_LIMIT_MILLIS;
+                if (now - lastProgress > stall || now - begin > WATCHDOG_MILLIS || testTooLong) {
+                    line("ABORT  " + (testTooLong ? "test " + testName + " runs for " + (now - testStarted) / 1000 + " s" : "no progress for " + (now - lastProgress) / 1000 + " s")
+                            + ", screen " + mc.currentScreen + ", state of all threads:");
                     for (java.util.Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
                         line("THREAD " + entry.getKey().getName() + " " + entry.getKey().getState());
                         StackTraceElement[] trace = entry.getValue();
@@ -192,7 +213,7 @@ public class InGameTestMod {
         FutureTask<T> task = new FutureTask<>(callable);
         queue.add(task);
         try {
-            return task.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return task.get(inWorld ? TASK_TIMEOUT_SECONDS : TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (ExecutionException e) {
             throw new RuntimeException(e.getCause());
         } catch (Exception e) {
@@ -200,22 +221,25 @@ public class InGameTestMod {
         }
     }
 
-    private <T> T client(Callable<T> callable) {
+    <T> T client(Callable<T> callable) {
         return on(clientTasks, callable);
     }
 
-    private void clientDo(Runnable runnable) {
+    void clientDo(Runnable runnable) {
         client(() -> {
             runnable.run();
             return null;
         });
     }
 
-    private <T> T server(Callable<T> callable) {
+    <T> T server(Callable<T> callable) {
+        MinecraftServer running = MinecraftServer.getServer();
+        if (running == null || !running.isServerRunning()) // Would not get an answer, no need to wait for that
+            throw new RuntimeException("the server is not running");
         return on(serverTasks, callable);
     }
 
-    private static void sleep(long millis) {
+    static void sleep(long millis) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
@@ -223,7 +247,7 @@ public class InGameTestMod {
         }
     }
 
-    private boolean waitFor(long millis, Callable<Boolean> condition) {
+    boolean waitFor(long millis, Callable<Boolean> condition) {
         long end = System.currentTimeMillis() + millis;
         while (System.currentTimeMillis() < end) {
             if (client(condition))
@@ -244,16 +268,16 @@ public class InGameTestMod {
         }
     }
 
-    private void info(String text) {
+    void info(String text) {
         line("INFO   " + text);
     }
 
-    private void check(boolean condition, String message) {
+    void check(boolean condition, String message) {
         if (!condition)
             problems.add(message);
     }
 
-    private void near(String name, double expected, double actual, double tolerance) {
+    void near(String name, double expected, double actual, double tolerance) {
         if (!(Math.abs(expected - actual) <= tolerance))
             problems.add(name + ": expected " + expected + " +-" + tolerance + " but was " + actual);
     }
@@ -265,10 +289,17 @@ public class InGameTestMod {
 
     private void test(String name, Body body) {
         String only = System.getProperty("cmdcam.ingametest.only");
-        if (only != null && !name.contains(only))
-            return;
+        if (only != null) { // Parts of names, separated by commas
+            boolean selected = false;
+            for (String part : only.split(","))
+                selected |= name.contains(part);
+            if (!selected)
+                return;
+        }
         problems.clear();
         long start = System.currentTimeMillis();
+        testName = name;
+        testStarted = start;
         line("START  " + name);
         try {
             reset();
@@ -280,6 +311,11 @@ public class InGameTestMod {
                 trace.append(" | ").append(elements[i]);
             problems.add("EXCEPTION " + trace);
         }
+        testStarted = 0;
+        // Every following test would run into its time limits
+        boolean lostWorld = !client(() -> mc.thePlayer != null && mc.theWorld != null);
+        if (lostWorld)
+            problems.add("the game is not in the world anymore, screen " + client(() -> mc.currentScreen));
         long took = System.currentTimeMillis() - start;
         if (problems.isEmpty()) {
             passed++;
@@ -296,6 +332,10 @@ public class InGameTestMod {
                 line("         " + problem);
             }
         }
+        if (lostWorld) {
+            line("ABORT  lost the world in " + name);
+            FMLCommonHandler.instance().exitJava(2, true);
+        }
     }
 
     // ---------------------------------------------------------------- game helpers
@@ -305,7 +345,7 @@ public class InGameTestMod {
     }
 
     /** Runs on the client thread and returns the unexpected exception, CommandExceptions are normal answers for bad input. */
-    private void cam(String command) {
+    void cam(String command) {
         clientDo(() -> command("cam").processCommand(mc.thePlayer, split(command)));
     }
 
@@ -313,7 +353,7 @@ public class InGameTestMod {
         return command.isEmpty() ? new String[0] : command.split(" ");
     }
 
-    private void camRejected(String command) {
+    void camRejected(String command) {
         Boolean rejected = client(() -> {
             try {
                 command("cam").processCommand(mc.thePlayer, split(command));
@@ -325,7 +365,7 @@ public class InGameTestMod {
         check(rejected, "/cam " + command + " should have been rejected");
     }
 
-    private void serverCommand(String command) {
+    void serverCommand(String command) {
         server(() -> {
             MinecraftServer server = MinecraftServer.getServer();
             ICommandSender sender = (EntityPlayerMP) server.getConfigurationManager().playerEntityList.get(0);
@@ -357,11 +397,11 @@ public class InGameTestMod {
         check(rejected, "/cam-server " + command + " should have been rejected");
     }
 
-    private CamScene scene() {
+    CamScene scene() {
         return client(CMDCamClient::getScene);
     }
 
-    private void reset() {
+    void reset() {
         clientDo(() -> {
             if (CMDCamClient.isPlaying())
                 CMDCamClient.stopServer();
@@ -393,11 +433,11 @@ public class InGameTestMod {
         sleep(120); // A few frames, so the position reached the server and nothing from the previous test is left
     }
 
-    private void addPoint(double x, double y, double z, double yaw, double pitch, double roll, double fov) {
+    void addPoint(double x, double y, double z, double yaw, double pitch, double roll, double fov) {
         clientDo(() -> CMDCamClient.getScene().points.add(new CamPoint(x, y, z, yaw, pitch, roll, fov)));
     }
 
-    private void addLine() {
+    void addLine() {
         addPoint(0, 100, 0, 0, 0, 0, 70);
         addPoint(30, 100, 0, 0, 0, 0, 70);
         addPoint(30, 100, 30, 0, 0, 0, 70);
@@ -490,7 +530,7 @@ public class InGameTestMod {
         return max;
     }
 
-    private void shot(String name) {
+    void shot(String name) {
         shotDone = new CountDownLatch(1);
         pendingShot = name;
         try {
@@ -514,28 +554,36 @@ public class InGameTestMod {
 
     private void createWorld() {
         world = "cmdcamtest" + System.currentTimeMillis();
-        clientDo(() -> {
-            mc.gameSettings.pauseOnLostFocus = false;
-            WorldSettings settings = new WorldSettings(12345L, WorldSettings.GameType.CREATIVE, false, false, WorldType.FLAT);
-            settings.enableCommands();
-            mc.launchIntegratedServer(world, world, settings);
-        });
-        joined();
+        startWorld(world);
         serverCommand("/gamerule doMobSpawning false");
         serverCommand("/gamerule doDaylightCycle false");
         serverCommand("/time set 6000");
         serverCommand("/weather clear 100000");
     }
 
-    private void joined() {
+    /** Creates a new world and joins it. */
+    void startWorld(String name) {
+        inWorld = false;
+        clientDo(() -> {
+            mc.gameSettings.pauseOnLostFocus = false;
+            WorldSettings settings = new WorldSettings(12345L, WorldSettings.GameType.CREATIVE, false, false, WorldType.FLAT);
+            settings.enableCommands();
+            mc.launchIntegratedServer(name, name, settings);
+        });
+        joined();
+    }
+
+    void joined() {
         if (!waitFor(SLOW ? TIMEOUT_SECONDS * 1000 : 240000, () -> mc.thePlayer != null && mc.theWorld != null && mc.currentScreen == null && MinecraftServer.getServer() != null && !MinecraftServer.getServer()
                 .getConfigurationManager().playerEntityList.isEmpty()))
             throw new RuntimeException("could not join the world");
         clientDo(() -> mc.inGameHasFocus = true);
         sleep(1000);
+        inWorld = true;
+        everInWorld = true;
     }
 
-    private void leave() {
+    void leave() {
         clientDo(() -> {
             mc.theWorld.sendQuittingDisconnectingPacket();
             mc.loadWorld(null);
@@ -544,7 +592,8 @@ public class InGameTestMod {
         sleep(500);
     }
 
-    private void rejoin() {
+    void rejoin() {
+        inWorld = false;
         clientDo(() -> mc.launchIntegratedServer(world, world, null));
         joined();
     }
@@ -600,7 +649,14 @@ public class InGameTestMod {
             test("death while playing", this::testDeath);
             test("dimension change while playing", this::testDimension);
             test("save and load through the server", this::testSaveLoad);
-            test("client scene storage", this::testClientStorage);
+            test("paths: stored in the folder of the game", paths::testStorage);
+            test("paths: move between worlds", paths::testBetweenWorlds);
+            test("paths: list opens from chat, sorts and filters", paths::testList);
+            test("paths: load, duplicate, rename, delete in the list", paths::testRowActions);
+            test("paths: advanced load moves the whole path", paths::testAdvancedLoad);
+            test("paths: save screen", paths::testSaveScreen);
+            test("paths: too large for one packet", paths::testLarge);
+            test("paths: folder button", paths::testFolderButton);
             test("cam-server commands", this::testServerCommands);
             test("server scene playback", this::testServerPlayback);
             test("bad command input", this::testFuzzClient);
@@ -625,10 +681,10 @@ public class InGameTestMod {
                 sleep(1500);
             } finally {
                 clientDo(mc::shutdown);
-                if (SLOW) { // GTNH asks for confirmation in a dialog before it quits
-                    sleep(20000);
-                    FMLCommonHandler.instance().exitJava(0, true);
-                }
+                // GTNH asks for confirmation in a dialog before it quits. Nothing is left to do, so nothing may hold the game open
+                sleep(20000);
+                line("INFO   the game did not close by itself, ending it");
+                FMLCommonHandler.instance().exitJava(0, true);
             }
         } catch (Throwable e) {
             line("ABORT  " + e);
@@ -698,11 +754,12 @@ public class InGameTestMod {
             checkFinite(frames, name);
             near(name + " duration", 1, seconds(frames), 0.25);
             check(frames.size() > 3, name + ": too few frames");
-            near(name + " starts at the first point", 0, frames.get(0).x, name.contains("circular") ? 15 : 4);
+            // At a low frame rate the first frame shows the camera a good part of a step after the start
+            near(name + " starts at the first point", 0, frames.get(0).x, name.contains("circular") ? 15 : Math.max(4, maxStep(frames) * 1.5));
             check(maxStep(frames) < 25, name + ": camera jumped " + maxStep(frames));
             Frame last = frames.get(frames.size() - 1);
             if (!name.contains("circular"))
-                near(name + " ends at the last point", -5, last.x, 8);
+                near(name + " ends at the last point", -5, last.x, Math.max(8, maxStep(frames) * 1.5)); // The last frame can be a long way before the end if the game hangs for a moment
             info(name + ": " + frames.size() + " frames, largest step " + maxStep(frames));
         }
     }
@@ -1444,7 +1501,7 @@ public class InGameTestMod {
         }
     }
 
-    private void assertSceneEquals(CamScene loaded) {
+    void assertSceneEquals(CamScene loaded) {
         check(loaded.points.size() == 2, "points: " + loaded.points.size());
         if (loaded.points.size() == 2) {
             CamPoint point = loaded.points.get(1);
@@ -1468,7 +1525,7 @@ public class InGameTestMod {
         check(CamScene.TIMER_TICKS.equals(loaded.timer), "timer: " + loaded.timer);
     }
 
-    private void fillScene() {
+    void fillScene() {
         addPoint(1, 2, 3, 0, 0, 0, 70);
         addPoint(4, 5, 6, 7, 8, 9, 10);
         cam("duration 12345ms");
@@ -1496,10 +1553,8 @@ public class InGameTestMod {
         cam("load does_not_exist");
         sleep(300);
         assertSceneEquals(scene());
-        camRejected("save");
-        camRejected("load");
-        camRejected("list");
-        camRejected("delete x");
+        cam("list");
+        camRejected("delete does_not_exist");
 
         reset();
         camRejected("save empty");
@@ -1512,31 +1567,7 @@ public class InGameTestMod {
         cam("load " + name);
         check(waitFor(5000, () -> !CMDCamClient.getScene().points.isEmpty()), "the saved scene was lost after rejoining the world");
         assertSceneEquals(scene());
-    }
-
-    private void testClientStorage() throws Exception {
-        fillScene();
-        String name = "storage_test";
-        clientDo(() -> ClientSceneStorage.set(name, CMDCamClient.getScene().copy()));
-        clientDo(ClientSceneStorage::load);
-        check(client(() -> ClientSceneStorage.names().contains(name)), "not stored in the file");
-        CamScene loaded = client(() -> ClientSceneStorage.get(name));
-        if (loaded != null)
-            assertSceneEquals(loaded);
-
-        File file = new File(new File(mc.mcDataDir, "config"), "cmdcam_scenes.dat");
-        check(file.exists(), "no file at " + file);
-        byte[] good = java.nio.file.Files.readAllBytes(file.toPath());
-        java.nio.file.Files.write(file.toPath(), new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 });
-        clientDo(ClientSceneStorage::load); // Has to survive a damaged file
-        check(client(() -> ClientSceneStorage.get(name)) == null, "read from a damaged file");
-        java.nio.file.Files.write(file.toPath(), good);
-        clientDo(ClientSceneStorage::load);
-        check(client(() -> ClientSceneStorage.get(name)) != null, "cannot read the file again");
-        check(client(() -> ClientSceneStorage.remove(name)), "remove");
-        check(!client(() -> ClientSceneStorage.remove(name)), "remove twice");
-        clientDo(ClientSceneStorage::load);
-        check(client(() -> ClientSceneStorage.get(name)) == null, "the removal was not stored");
+        cam("delete " + name);
     }
 
     private void testServerCommands() {

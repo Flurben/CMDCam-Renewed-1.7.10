@@ -7,18 +7,22 @@ import java.util.List;
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.command.CommandException;
 import net.minecraft.command.ICommandSender;
 import net.minecraft.command.WrongUsageException;
-import team.creative.cmdcam.CMDCam;
+import team.creative.cmdcam.client.gui.GuiPathBrowser;
+import team.creative.cmdcam.client.gui.GuiPathSave;
+import team.creative.cmdcam.client.path.LocalPaths;
+import team.creative.cmdcam.client.path.PathActions;
+import team.creative.cmdcam.client.path.ServerPaths;
 import team.creative.cmdcam.common.command.CamCommandBase;
 import team.creative.cmdcam.common.command.CamCommandProcessor;
 import team.creative.cmdcam.common.command.SceneCommands;
 import team.creative.cmdcam.common.math.interpolation.CamInterpolation;
 import team.creative.cmdcam.common.math.point.CamPoint;
-import team.creative.cmdcam.common.packet.CamPacket;
 import team.creative.cmdcam.common.scene.CamScene;
-import team.creative.cmdcam.common.scene.SceneNBT;
+import team.creative.cmdcam.common.scene.path.PathNames;
 import team.creative.cmdcam.common.target.CamTarget;
 
 /** /cam: edits and plays the scene of this client. */
@@ -62,8 +66,9 @@ public class CommandCam extends CamCommandBase implements CamCommandProcessor {
         sendUsage(sender, "/cam spinning_fix [no_fix|fix|fix_keep_direction]", "get or set");
         sendUsage(sender, "/cam timer [realtime|ticks]", "get or set, ticks stays in sync with the game when recording");
         sendUsage(sender, "/cam show|hide [all|<interpolation>]", "preview paths, nothing means the active one");
-        sendUsage(sender, "/cam save|load <name>", "store scenes, on the server if it has the mod");
-        sendUsage(sender, "/cam list|delete <name>", "the scenes of this client");
+        sendUsage(sender, "/cam save [name]", "store the path in the cmdcam-paths folder and on the server if it has the mod, without a name it opens a screen");
+        sendUsage(sender, "/cam load [name]", "load a path, without a name it opens a screen to manage all paths");
+        sendUsage(sender, "/cam list | delete <name>", "the paths in the cmdcam-paths folder");
         sendUsage(sender, "/cam info", "everything about the current scene");
     }
 
@@ -94,24 +99,22 @@ public class CommandCam extends CamCommandBase implements CamCommandProcessor {
                 setVisible(sender, args, false);
                 return;
             case "list":
-                if (CMDCamClient.serverAvailable())
-                    throw new CommandException("scenes.list_fail");
-                send(sender, "scenes.list", ClientSceneStorage.names().size(), String.join(", ", ClientSceneStorage.names()));
+                List<String> names = LocalPaths.names();
+                send(sender, "scenes.list", names.size(), String.join(", ", names));
                 return;
             case "load":
-                load(sender, args);
+                load(args);
                 return;
             case "save":
-                save(sender, args);
+                save(args);
                 return;
             case "delete":
                 if (args.length < 2)
                     throw new WrongUsageException("/cam delete <name>");
-                if (CMDCamClient.serverAvailable())
-                    throw new CommandException("scenes.list_fail");
-                if (!ClientSceneStorage.remove(args[1]))
-                    throw new CommandException("scene.remove_fail", args[1]);
-                send(sender, "scene.remove", args[1]);
+                String name = nameArgument(args);
+                if (!LocalPaths.delete(name))
+                    throw new CommandException("scene.remove_fail", name);
+                send(sender, "scene.remove", name);
                 return;
             case "follow_center":
                 CMDCamClient.setTargetMarker(followCenter(sender, tail(args, 1)));
@@ -166,35 +169,42 @@ public class CommandCam extends CamCommandBase implements CamCommandProcessor {
         send(sender, "scene.interpolation." + suffix, args[1]);
     }
 
-    private static void load(ICommandSender sender, String[] args) {
-        if (args.length < 2)
-            throw new WrongUsageException("/cam load <name>");
-        if (CMDCamClient.serverAvailable()) {
-            CMDCam.NETWORK.sendToServer(new CamPacket(CamPacket.Action.GET, args[1], null));
-            return;
-        }
-        CamScene scene = ClientSceneStorage.get(args[1]);
-        if (scene == null)
-            throw new CommandException("scene.load_fail", args[1]);
-        CMDCamClient.set(scene);
-        send(sender, "scene.load", args[1]);
+    /** @return everything after the sub command, names can contain spaces */
+    private static String nameArgument(String[] args) {
+        return String.join(" ", tail(args, 1));
     }
 
-    private static void save(ICommandSender sender, String[] args) {
-        if (args.length < 2)
-            throw new WrongUsageException("/cam save <name>");
+    /** The chat closes itself after running a command, a screen opened right now would be closed with it. */
+    private static void openLater(final GuiScreen screen) {
+        ClientProxy.schedule(new Runnable() {
+            @Override
+            public void run() {
+                if (mc.thePlayer != null)
+                    mc.displayGuiScreen(screen);
+            }
+        });
+    }
+
+    private static void load(String[] args) {
+        if (args.length < 2) {
+            openLater(new GuiPathBrowser());
+            return;
+        }
+        PathActions.loadByName(nameArgument(args));
+    }
+
+    private static void save(String[] args) {
         CamScene scene;
         try {
             scene = CMDCamClient.createScene();
         } catch (SceneException e) {
             throw new CommandException(e.getMessage());
         }
-        if (CMDCamClient.serverAvailable())
-            CMDCam.NETWORK.sendToServer(new CamPacket(CamPacket.Action.SET, args[1], SceneNBT.save(scene)));
-        else {
-            ClientSceneStorage.set(args[1], scene);
-            send(sender, "scene.save", args[1]);
+        if (args.length < 2) {
+            openLater(new GuiPathSave(scene));
+            return;
         }
+        PathActions.save(nameArgument(args), scene);
     }
 
     @Override
@@ -264,8 +274,15 @@ public class CommandCam extends CamCommandBase implements CamCommandProcessor {
             options.add("all");
             return matching(args[1], options);
         }
-        if (args.length == 2 && (args[0].equals("load") || args[0].equals("delete")) && !CMDCamClient.serverAvailable())
-            return matching(args[1], new ArrayList<>(ClientSceneStorage.names()));
+        if (args.length == 2 && args[0].equals("delete"))
+            return matching(args[1], LocalPaths.names());
+        if (args.length == 2 && args[0].equals("load")) {
+            List<String> names = LocalPaths.names();
+            for (String name : ServerPaths.names()) // As far as they are known, the list only comes when the screen is opened
+                if (!PathNames.contains(names, name))
+                    names.add(name);
+            return matching(args[1], names);
+        }
         return SceneCommands.tabComplete(args);
     }
 

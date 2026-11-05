@@ -12,18 +12,20 @@ Get the jar from the [releases page](https://github.com/Flurben/CMDCam-Renewed-1
 
 | Part | Checked by |
 | --- | --- |
-| Math, timers, stage planning, duration parsing | `MathSelfTest`: 348 checks pass, run by `./gradlew build` |
+| Math, timers, stage planning, duration parsing, path names and statistics | `MathSelfTest`: 449 checks pass, run by `./gradlew build` |
 | All code against Minecraft 1.7.10 and Forge | `./gradlew build` passes, including reobfuscation |
-| Playing scenes in plain Forge | In-game test, 37 of 37 groups pass: Prism, reobfuscated jar, Java 8, LWJGL 2.9.4 |
-| Playing scenes in a modpack | In-game test, 37 of 37 groups pass in two runs: GT New Horizons 2.8.4 with 230 mods, Angelica, lwjgl3ify, Java 25, LWJGL 3.3.3 |
+| Playing scenes and saved paths in plain Forge | In-game test, 44 of 44 groups pass: Prism, reobfuscated jar, Java 8, LWJGL 2.9.4 |
+| Playing scenes and saved paths in a modpack | In-game test, 44 of 44 groups pass: GT New Horizons 2.8.4 with 230 mods, Angelica, lwjgl3ify, Java 25, LWJGL 3.3.3 |
 | Preview, outside mode, hidden HUD, roll and zoom | Screenshots from the in-game test, checked by eye in both setups |
+| Screens for saved paths | In-game test with clicks and keys sent to the screens, screenshots checked by eye. The folder button opened Explorer on Windows, macOS and Linux have not been tried |
+| Saved paths from other players, operators on a server | Only simulated in singleplayer: paths with other creators, and the buttons without permission. The server refusing someone who is not an operator has not been run |
 | `/cam-server` with the world owner as the only player | In-game test |
 | Holding the zoom and roll keys | In-game test with LWJGL 2 only. It is skipped under lwjgl3ify, where the keyboard cannot be simulated |
 | Dedicated server | **Not run**, `runServer` asks you to accept the EULA. A static check found no client classes in server code |
 | A second player, LAN, joining a real server | **Not tested** |
 | Real mouse and keyboard input | Manual test in the dev client only, the in-game test simulates key presses |
 
-The in-game test lives in `src/ingametest` and only becomes part of the jar with `-PingameTest`, a normal build does not contain it. It runs when the game is started with `-Dcmdcam.ingametest=true` (add `-Dcmdcam.ingametest.slow=true` for a large modpack, and `-Dcmdcam.ingametest.only=<part of a name>` for selected tests), writes `cmdcam-ingametest.txt` and screenshots to the game directory, and closes the game. Use a world and instance you do not need: it creates a test world, and it moves and kills the player.
+The in-game test lives in `src/ingametest` and only becomes part of the jar with `-PingameTest`, a normal build does not contain it. It runs when the game is started with `-Dcmdcam.ingametest=true` (add `-Dcmdcam.ingametest.slow=true` for a large modpack, and `-Dcmdcam.ingametest.only=<parts of names, separated by commas>` for selected tests, which can also be set in a `cmdcam-ingametest.properties` file in the game directory), writes `cmdcam-ingametest.txt` and screenshots to the game directory, and closes the game. If nothing happens for a minute (three in slow mode) or a single test takes more than two minutes (eight in slow mode), it writes the state of all threads to the report and ends the game. Use a world and instance you do not need: it creates test worlds, moves and kills the player, and adds and removes paths named `t_...` in `cmdcam-paths`.
 
 ```bash
 ./gradlew jar reobfJar -PingameTest
@@ -32,7 +34,7 @@ The in-game test lives in `src/ingametest` and only becomes part of the jar with
 To run the tests without Gradle (no Minecraft needed), from the project root:
 
 ```bash
-mkdir -p build/selftest && javac --release 8 -Xlint:-options -encoding UTF-8 -d build/selftest $(find src/main/java/team/creative/cmdcam/common/math src/main/java/team/creative/cmdcam/common/scene/attribute src/main/java/team/creative/cmdcam/common/scene/timer src/main/java/team/creative/cmdcam/common/scene/run -name '*.java') src/main/java/team/creative/cmdcam/common/util/DurationParser.java src/test/java/team/creative/cmdcam/MathSelfTest.java && java -cp build/selftest team.creative.cmdcam.MathSelfTest
+mkdir -p build/selftest && javac --release 8 -Xlint:-options -encoding UTF-8 -d build/selftest $(find src/main/java/team/creative/cmdcam/common/math src/main/java/team/creative/cmdcam/common/scene/attribute src/main/java/team/creative/cmdcam/common/scene/timer src/main/java/team/creative/cmdcam/common/scene/run src/main/java/team/creative/cmdcam/common/scene/path -name '*.java') src/main/java/team/creative/cmdcam/common/util/DurationParser.java src/test/java/team/creative/cmdcam/MathSelfTest.java && java -cp build/selftest team.creative.cmdcam.MathSelfTest
 ```
 
 To build the mod, which also runs these tests:
@@ -69,10 +71,33 @@ To build the mod, which also runs these tests:
 | `/cam target\|follow [none\|self\|select\|player <name>\|entity <selector>\|pos <x y z>]` | Look at or move with a target |
 | `/cam pitch\|yaw\|pos step <value>` | How fast targets are followed, `1` is instantly |
 | `/cam show\|hide [all\|<interpolation>]` | Preview paths in the world |
-| `/cam save\|load <name>` | Store scenes, on the server if it has the mod |
+| `/cam save [name]` | Store the path in the `cmdcam-paths` folder, and on the server if it has the mod. Without a name it opens the [save screen](#saved-paths) |
+| `/cam load [name]` | Load a path. Without a name it opens the [list of paths](#saved-paths) |
+| `/cam list`, `/cam delete <name>` | The paths in the `cmdcam-paths` folder |
 | `/cam info` | Everything about the current scene |
 
 `/cam-server` (permission level 2, usable from command blocks) stores scenes in the world and plays them for others: `start <scene> <players> [duration] [loops]`, `stop|pause|resume <players>`, `get <scene> <setting> ...`, `create|remove <scene>`, `list`, `clear`.
+
+## Saved paths
+
+Saved paths live in the `cmdcam-paths` folder of the Minecraft instance, one `.nbt` file per path, so they work in every world and on every server. Files can be copied in and out of the folder while the game runs. Scenes saved by 0.1.0 are moved there on the first start, and the old file stays as `config/cmdcam_scenes.dat.migrated`.
+
+If the server has the mod, `/cam save` stores the path on the server as well. Only operators can do that, for everyone else the path is only stored in the folder. `/cam load <name>` looks on the server first and then in the folder. In singleplayer the world counts as the server, which keeps `/cam-server` working.
+
+**`/cam load`** opens a list of all paths, newest first. Each line has a preview of the curve `/cam show` would draw, the number of points, the interpolation, duration, length, average speed, start, creator, and when it was saved and last loaded. Point at a preview to turn it and to see everything else.
+
+- **Sort** by last saved or last loaded, **filter** by creator and by where a path is stored.
+- **Load** uses the path as it was saved.
+- **Advanced** loads it somewhere else: enter coordinates, `~ ~ ~` for your position or `~5 ~ ~-2` for an offset from it. The whole path moves, and so does a look or follow target at a fixed block. This is not available for a path following an entity or a player, since it has no location of its own.
+- **Duplicate** always creates a copy in the folder, which is how to keep a path from a server. You are the creator of the copy.
+- **Rename** and **Delete** change the copy this line stands for. On a server only operators can use them, for all paths there.
+- **Open Path Folder** works like the button in the resource pack screen.
+
+A path stored in the same way in the folder and on the server takes one line, marked `Folder + Server`. Its buttons act on the copy in the folder, choose `Stored: Server` to reach the other one.
+
+**`/cam save`** opens the same list below a name and a start location, which defaults to the current start. A different start moves the saved path, not the one you are editing. **Overwrite** asks first. In the folder it only works for paths by the same creator, on a server operators can overwrite all paths. `/cam save <name>` overwrites without asking.
+
+Limits of the game: a client can only send about 32 kB to a server, so a path of several hundred points or more only reaches the folder, and you are told so. Names can be up to 64 characters long, without `< > : " / \ | ? *`, since they are file names.
 
 ## Differences to the old 1.7.10 version
 
@@ -82,7 +107,7 @@ New in this port, in neither upstream version:
 
 - `hide_gui`, `return_start` and `timer realtime|ticks` scene settings
 - `/cam info`, `/cam delete <name>`, tab completion and `@e[type=...,name=...,r=...,c=...]` selectors
-- Client scenes survive a restart (`config/cmdcam_scenes.dat`)
+- Saved paths are files that work in all worlds, with [screens to manage them](#saved-paths)
 - `~` relative coordinates and rotation in points
 - Target following does not depend on the frame rate
 - A config screen with the defaults for new scenes
@@ -120,6 +145,7 @@ Other bugs found while porting:
 - In singleplayer, a very long jump of the camera (`/cam goto`, a fast path, `return_start`) could freeze the server for good, because it scanned every block between the old and the new position for collisions
 - `/cam-server` crashed with an invalid selector such as `@r[c=-5]`
 - A following scene whose target was already gone sent the camera to its offsets near the world origin, it now waits where it is
+- A scene too large for Minecraft's packet format could not be sent to players, for example with `/cam-server start` on a long path
 
 ## Known limitations
 

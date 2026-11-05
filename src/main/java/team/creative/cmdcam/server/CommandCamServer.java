@@ -18,6 +18,7 @@ import team.creative.cmdcam.common.command.SceneCommands;
 import team.creative.cmdcam.common.math.point.CamPoint;
 import team.creative.cmdcam.common.packet.CamPacket;
 import team.creative.cmdcam.common.scene.CamScene;
+import team.creative.cmdcam.common.scene.SavedPath;
 import team.creative.cmdcam.common.scene.SceneNBT;
 import team.creative.cmdcam.common.util.EntityUtil;
 
@@ -98,7 +99,12 @@ public class CommandCamServer extends CamCommandBase implements CamCommandProces
                     throw new WrongUsageException("/cam-server create <scene>");
                 if (CMDCamServer.data().get(args[1]) != null)
                     throw new CommandException("scene.exists", args[1]);
-                CMDCamServer.data().set(args[1], CamScene.createDefault());
+                SavedPath created = new SavedPath(args[1], CamScene.createDefault());
+                created.creator = sender.getCommandSenderName();
+                if (sender instanceof EntityPlayerMP)
+                    created.creatorId = ((EntityPlayerMP) sender).getUniqueID().toString();
+                created.savedAt = System.currentTimeMillis();
+                CMDCamServer.data().set(created);
                 send(sender, "scene.create", args[1]);
                 break;
             default:

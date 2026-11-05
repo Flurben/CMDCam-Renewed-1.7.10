@@ -6,6 +6,7 @@ import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayerMP;
+import team.creative.cmdcam.client.path.ServerPaths;
 import team.creative.cmdcam.server.CMDCamServer;
 import team.creative.cmdcam.common.math.point.CamPoint;
 import team.creative.cmdcam.common.math.vec.Vec3d;
@@ -77,6 +78,7 @@ public class CMDCamClient {
         serverAvailable = false;
         scene = CamScene.createDefault();
         targetMarker = null;
+        ServerPaths.reset();
     }
 
     /** @return the scene the commands change */

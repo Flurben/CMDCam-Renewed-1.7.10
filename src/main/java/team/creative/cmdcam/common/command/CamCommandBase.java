@@ -11,6 +11,7 @@ import net.minecraft.command.ICommandSender;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.util.EnumChatFormatting;
+import team.creative.cmdcam.common.scene.path.RelativeCoordinate;
 import team.creative.cmdcam.common.util.DurationParser;
 
 public abstract class CamCommandBase extends CommandBase {
@@ -63,9 +64,11 @@ public abstract class CamCommandBase extends CommandBase {
 
     /** Parses a number which can be relative to the base by starting with ~. */
     public static double parseRelative(double base, String value) throws CommandException {
-        if (value.startsWith("~"))
-            return value.length() == 1 ? base : base + parseNumber(value.substring(1));
-        return parseNumber(value);
+        try {
+            return RelativeCoordinate.parse(base, value);
+        } catch (NumberFormatException e) {
+            throw new CommandException("cam.invalid_number", value);
+        }
     }
 
     public static boolean parseBool(String value) throws CommandException {

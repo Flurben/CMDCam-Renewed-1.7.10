@@ -121,6 +121,53 @@ public class CamScene implements PathContext {
             yawStep = step;
     }
 
+    /** @return false if the points are relative to something moving, then the path has no location of its own */
+    public boolean canMove() {
+        return posTarget == null || posTarget instanceof CamTarget.BlockTarget;
+    }
+
+    /** @return where the path begins, null without points. For a scene following something moving this is the offset to it */
+    public Vec3d startPosition() {
+        if (points.isEmpty())
+            return null;
+        Vec3d start = new Vec3d(points.get(0));
+        if (posTarget instanceof CamTarget.BlockTarget)
+            start.add(posTarget.position(null, 0));
+        return start;
+    }
+
+    /**
+     * Moves the whole path. A look or follow target at a fixed block moves with it, otherwise the shot would look elsewhere and a circular path would change its shape. Blocks only
+     * have whole coordinates: with a follow target the rest of the distance goes to the points, a look target can end up less than one block off.
+     */
+    public void translate(double x, double y, double z) {
+        if (!canMove())
+            return;
+        int blockX = (int) Math.round(x);
+        int blockY = (int) Math.round(y);
+        int blockZ = (int) Math.round(z);
+
+        double pointX = x;
+        double pointY = y;
+        double pointZ = z;
+        if (posTarget instanceof CamTarget.BlockTarget) {
+            CamTarget.BlockTarget block = (CamTarget.BlockTarget) posTarget;
+            posTarget = new CamTarget.BlockTarget(block.x + blockX, block.y + blockY, block.z + blockZ);
+            pointX -= blockX;
+            pointY -= blockY;
+            pointZ -= blockZ;
+        }
+        for (CamPoint point : points) {
+            point.x += pointX;
+            point.y += pointY;
+            point.z += pointZ;
+        }
+        if (lookTarget instanceof CamTarget.BlockTarget) {
+            CamTarget.BlockTarget block = (CamTarget.BlockTarget) lookTarget;
+            lookTarget = new CamTarget.BlockTarget(block.x + blockX, block.y + blockY, block.z + blockZ);
+        }
+    }
+
     public void set(CamScene scene) {
         duration = scene.duration;
         loop = scene.loop;
